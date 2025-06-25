@@ -207,3 +207,4 @@ extern crate serde;
 
 #[cfg(feature = "codegen")]
 extern crate tokio;
+// Trigger rebuild

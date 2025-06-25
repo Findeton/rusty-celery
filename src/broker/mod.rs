@@ -23,6 +23,15 @@ pub mod mock;
 #[cfg(test)]
 use std::any::Any;
 
+/// Consumer health information
+#[derive(Debug, Clone)]
+pub struct ConsumerHealth {
+    pub queue_name: String,
+    pub consumer_count: u32,
+    pub message_count: u32,
+    pub is_consuming: bool,
+}
+
 /// The type representing a successful delivery.
 #[async_trait]
 pub trait Delivery: TryDeserializeMessage + Send + Sync + std::fmt::Debug {
@@ -94,6 +103,10 @@ pub trait Broker: Send + Sync {
 
     /// Try reconnecting in the event of some sort of connection error.
     async fn reconnect(&self, connection_timeout: u32) -> Result<(), BrokerError>;
+
+    /// Check the health of consumers for the given queues.
+    /// Returns a vector of consumer health information.
+    async fn check_consumer_health(&self, queues: &Vec<String>) -> Result<Vec<ConsumerHealth>, BrokerError>;
 
     #[cfg(test)]
     fn into_any(self: Box<Self>) -> Box<dyn Any>;

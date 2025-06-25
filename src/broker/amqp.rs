@@ -1,4 +1,6 @@
-//! AMQP broker.
+use super::{Broker, BrokerBuilder, DeliveryError, DeliveryStream, ConsumerHealth};
+use std::any::Any;
+/// AMQP broker.
 
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -17,13 +19,11 @@ use std::str::FromStr;
 use std::task::Poll;
 use tokio::sync::{Mutex, RwLock};
 
-use super::{Broker, BrokerBuilder, DeliveryError, DeliveryStream};
 use crate::error::{BrokerError, ProtocolError};
 use crate::protocol::{Message, MessageHeaders, MessageProperties, TryDeserializeMessage};
 use tokio_executor_trait::Tokio as TokioExecutor;
 
-#[cfg(test)]
-use std::any::Any;
+
 
 struct Consumer {
     wrapped: lapin::Consumer,
@@ -388,6 +388,66 @@ impl Broker for AMQPBroker {
         Ok(())
     }
 
+    
+    /// Check the health of consumers for the given queues.
+    async fn check_consumer_health(&self, queues: &Vec<String>) -> Result<Vec<ConsumerHealth>, BrokerError> {
+        let mut health_info = Vec::new();
+        
+        let consume_channel = self.consume_channel.read().await;
+        
+        for queue_name in queues.clone() {
+            // Get queue info using queue_declare with passive=true
+            let queue_result = consume_channel
+                .queue_declare(
+                    queue_name.as_str(),
+                    QueueDeclareOptions {
+                        passive: true,  // Dont create, just get info
+                        durable: true,
+                        exclusive: false,
+                        auto_delete: false,
+                        nowait: false,
+                    },
+                    FieldTable::default(),
+                )
+                .await;
+
+            match queue_result {
+                Ok(queue) => {
+                    // Get queue statistics
+                    let message_count = queue.message_count();
+                    let consumer_count = queue.consumer_count();
+                    
+                    // A queue is considered to have active consumers if:
+                    // 1. It has at least one consumer
+                    // 2. The connection and channel are active
+                    let is_consuming = consumer_count > 0 
+                        && self.conn.lock().await.status().connected()
+                        && consume_channel.status().connected();
+
+                    health_info.push(ConsumerHealth {
+                        queue_name: queue_name.to_string(),
+                        consumer_count,
+                        message_count,
+                        is_consuming,
+                    });
+                }
+                Err(e) => {
+                    // If we cant get queue info, assume its not healthy
+                    health_info.push(ConsumerHealth {
+                        queue_name: queue_name.to_string(),
+                        consumer_count: 0,
+                        message_count: 0,
+                        is_consuming: false,
+                    });
+                    // Log the error for debugging
+                    log::warn!("Failed to get health info for queue {}: {}", queue_name, e);
+                }
+            }
+        }
+
+        Ok(health_info)
+    }
+
     #[cfg(test)]
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
@@ -613,7 +673,7 @@ fn amqp_value_to_u32(v: &AMQPValue) -> Option<u32> {
     }
 }
 
-#[cfg(test)]
+
 mod tests {
     use super::*;
     use lapin::types::ShortString;

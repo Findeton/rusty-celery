@@ -20,7 +20,7 @@ mod trace;
 use crate::broker::{
     broker_builder_from_url, build_and_connect, configure_task_routes, Broker, BrokerBuilder,
     Delivery,
-};
+ ConsumerHealth};
 use crate::error::{BrokerError, CeleryError, TraceError};
 use crate::protocol::{Message, MessageContentType};
 use crate::routing::Rule;
@@ -468,6 +468,11 @@ impl Celery {
     }
 
     /// Close channels and connections.
+    /// Check the health of consumers for the specified queues.
+    pub async fn check_consumer_health(&self, queues: &Vec<String>) -> Result<Vec<ConsumerHealth>, CeleryError> {
+        Ok(self.broker.check_consumer_health(queues).await?)
+    }
+
     pub async fn close(&self) -> Result<(), CeleryError> {
         Ok(self.broker.close().await?)
     }

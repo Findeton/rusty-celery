@@ -126,6 +126,20 @@ impl Broker for MockBroker {
     }
 
     #[cfg(test)]
+    /// Mock implementation of consumer health check.
+    async fn check_consumer_health(&self, queues: &[&str]) -> Result<Vec<super::ConsumerHealth>, BrokerError> {
+        let mut health_info = Vec::new();
+        for &queue_name in queues {
+            health_info.push(super::ConsumerHealth {
+                queue_name: queue_name.to_string(),
+                consumer_count: 1,
+                message_count: 0,
+                is_consuming: true,
+            });
+        }
+        Ok(health_info)
+    }
+
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
     }
