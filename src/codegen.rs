@@ -4,7 +4,7 @@ pub use celery_codegen::task;
 #[macro_export]
 macro_rules! __app_internal {
     (
-        $broker_type:ty { $broker_url:expr },
+        $builder:expr,
         [ $( $t:ty ),* ],
         [ $( $pattern:expr => $queue:expr ),* ],
         $( $x:ident = $y:expr, )*
@@ -20,9 +20,7 @@ macro_rules! __app_internal {
             Ok($crate::export::Arc::new(celery))
         }
 
-        let broker_url = $broker_url;
-
-        let mut builder = $crate::CeleryBuilder::new("celery", &broker_url);
+        let mut builder = $builder;
 
         $(
             builder = builder.$x($y);
@@ -40,7 +38,7 @@ macro_rules! __app_internal {
 #[macro_export]
 macro_rules! __beat_internal {
     (
-        $broker_type:ty { $broker_url:expr },
+        $builder:expr,
         $scheduler_backend_type:ty { $scheduler_backend:expr },
         [
             $( $task_name:expr => {
@@ -63,9 +61,7 @@ macro_rules! __beat_internal {
             Ok(beat)
         }
 
-        let broker_url = $broker_url;
-
-        let mut builder = $crate::beat::Beat::<$scheduler_backend_type>::custom_builder("beat", &broker_url, $scheduler_backend);
+        let mut builder = $builder;
 
         $(
             builder = builder.$x($y);
@@ -151,13 +147,26 @@ macro_rules! __beat_internal {
 #[macro_export]
 macro_rules! app {
     (
+        broker_builder = $broker_builder:expr,
+        tasks = [ $( $t:ty ),* $(,)? ],
+        task_routes = [ $( $pattern:expr => $queue:expr ),* $(,)? ]
+        $(, $x:ident = $y:expr )* $(,)?
+    ) => {
+        $crate::__app_internal!(
+            $crate::CeleryBuilder::with_broker("celery", $broker_builder),
+            [ $( $t ),* ],
+            [ $( $pattern => $queue ),* ],
+            $( $x = $y, )*
+        );
+    };
+    (
         broker = $broker_type:ty { $broker_url:expr },
         tasks = [ $( $t:ty ),* $(,)? ],
         task_routes = [ $( $pattern:expr => $queue:expr ),* $(,)? ]
         $(, $x:ident = $y:expr )* $(,)?
     ) => {
         $crate::__app_internal!(
-            $broker_type { $broker_url },
+            $crate::CeleryBuilder::new("celery", &$broker_url),
             [ $( $t ),* ],
             [ $( $pattern => $queue ),* ],
             $( $x = $y, )*
@@ -306,6 +315,32 @@ macro_rules! app {
 #[macro_export]
 macro_rules! beat {
     (
+        broker_builder = $broker_builder:expr,
+        tasks = [
+            $( $task_name:expr => {
+                $task_type:ty,
+                schedule = $schedule:expr,
+                args = $args:tt $(,)?
+            } ),* $(,)?
+        ],
+        task_routes = [ $( $pattern:expr => $queue:expr ),* $(,)? ]
+        $(, $x:ident = $y:expr )* $(,)?
+    ) => {
+        $crate::__beat_internal!(
+            $crate::beat::BeatBuilder::with_broker("beat", $broker_builder, $crate::beat::LocalSchedulerBackend::new()),
+            $crate::beat::LocalSchedulerBackend { $crate::beat::LocalSchedulerBackend::new() },
+            [ $ (
+                $task_name => {
+                    $task_type,
+                    $schedule,
+                    $args
+                }
+            ),* ],
+            [ $( $pattern => $queue ),* ],
+            $( $x = $y, )*
+        );
+    };
+    (
         broker = $broker_type:ty { $broker_url:expr },
         tasks = [
             $( $task_name:expr => {
@@ -318,7 +353,7 @@ macro_rules! beat {
         $(, $x:ident = $y:expr )* $(,)?
     ) => {
         $crate::__beat_internal!(
-            $broker_type { $broker_url },
+            $crate::beat::BeatBuilder::with_default_scheduler_backend("beat", &$broker_url),
             $crate::beat::LocalSchedulerBackend { $crate::beat::LocalSchedulerBackend::new() },
             [ $ (
                 $task_name => {
@@ -345,7 +380,7 @@ macro_rules! beat {
         $(, $x:ident = $y:expr )* $(,)?
     ) => {
         $crate::__beat_internal!(
-            $broker_type { $broker_url },
+            $crate::beat::BeatBuilder::with_custom_scheduler_backend("beat", &$broker_url, $scheduler_backend),
             $scheduler_backend_type { $scheduler_backend },
             [ $ (
                 $task_name => {

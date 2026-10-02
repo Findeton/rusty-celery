@@ -101,10 +101,19 @@ where
         broker_url: &str,
         scheduler_backend: Sb,
     ) -> Self {
+        Self::with_broker(name, broker_builder_from_url(broker_url), scheduler_backend)
+    }
+
+    /// Create a scheduler using an externally implemented broker.
+    pub fn with_broker(
+        name: &str,
+        broker_builder: Box<dyn BrokerBuilder>,
+        scheduler_backend: Sb,
+    ) -> Self {
         Self {
             config: Config {
                 name: name.into(),
-                broker_builder: broker_builder_from_url(broker_url),
+                broker_builder,
                 broker_connection_timeout: 2,
                 broker_connection_retry: true,
                 broker_connection_max_retries: 5,
