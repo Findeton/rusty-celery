@@ -48,6 +48,11 @@ pub struct CeleryBuilder {
 impl CeleryBuilder {
     /// Get a [`CeleryBuilder`] for creating a [`Celery`] app with a custom configuration.
     pub fn new(name: &str, broker_url: &str) -> Self {
+        Self::with_broker(name, broker_builder_from_url(broker_url))
+    }
+
+    /// Create an app using an externally implemented broker.
+    pub fn with_broker(name: &str, broker_builder: Box<dyn BrokerBuilder>) -> Self {
         Self {
             config: Config {
                 name: name.into(),
@@ -59,7 +64,7 @@ impl CeleryBuilder {
                         .and_then(|sys_hostname| sys_hostname.into_string().ok())
                         .unwrap_or_else(|| "unknown".into())
                 ),
-                broker_builder: broker_builder_from_url(broker_url),
+                broker_builder,
                 broker_connection_timeout: 2,
                 broker_connection_retry: true,
                 broker_connection_max_retries: 5,
