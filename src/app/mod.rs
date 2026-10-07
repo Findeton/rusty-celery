@@ -19,8 +19,8 @@ mod trace;
 
 use crate::broker::{
     broker_builder_from_url, build_and_connect, configure_task_routes, Broker, BrokerBuilder,
-    Delivery,
- ConsumerHealth};
+    ConsumerHealth, Delivery, DeliveryOutcome,
+};
 use crate::error::{BrokerError, CeleryError, TraceError};
 use crate::protocol::{Message, MessageContentType};
 use crate::routing::Rule;
@@ -373,7 +373,7 @@ impl Celery {
                 // This is a naughty message that we can't handle, so we'll ack it with
                 // the broker so it gets deleted.
                 self.broker
-                    .ack(delivery.as_ref())
+                    .ack_with_outcome(delivery.as_ref(), DeliveryOutcome::Rejected)
                     .await
                     .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)?;
                 return Err(Box::new(e));
@@ -390,7 +390,7 @@ impl Celery {
                 // the body of the message for some reason, so ack it with the broker
                 // to delete it and return an error.
                 self.broker
-                    .ack(delivery.as_ref())
+                    .ack_with_outcome(delivery.as_ref(), DeliveryOutcome::Rejected)
                     .await
                     .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)?;
                 return Err(e);
@@ -433,18 +433,24 @@ impl Celery {
         // NOTE: we don't need to log errors from the trace here since the tracer
         // handles all errors at it's own level or the task level. In this function
         // we only log errors at the broker and delivery level.
-        if let Err(TraceError::Retry(retry_eta)) = tracer.trace().await {
-            // If retry error -> retry the task.
-            self.broker
-                .retry(delivery.as_ref(), retry_eta)
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)?;
-        }
+        let outcome = match tracer.trace().await {
+            Ok(()) => DeliveryOutcome::Succeeded,
+            Err(TraceError::Retry(retry_eta)) => {
+                // If retry error -> retry the task.
+                self.broker
+                    .retry(delivery.as_ref(), retry_eta)
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)?;
+                DeliveryOutcome::Retried
+            }
+            Err(TraceError::ExpirationError) => DeliveryOutcome::Expired,
+            Err(TraceError::TaskError(_)) => DeliveryOutcome::Failed,
+        };
 
         // If we have not done it before, we have to acknowledge the message now.
         if tracer.acks_late() {
             self.broker
-                .ack(delivery.as_ref())
+                .ack_with_outcome(delivery.as_ref(), outcome)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>)?;
         }

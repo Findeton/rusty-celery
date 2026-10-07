@@ -23,6 +23,33 @@ pub mod mock;
 #[cfg(test)]
 use std::any::Any;
 
+/// How the processing of a delivery ended, reported when it is acknowledged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryOutcome {
+    /// The task ran and returned successfully.
+    Succeeded,
+    /// The task failed and will not be retried.
+    Failed,
+    /// The task expired before it could run.
+    Expired,
+    /// The message could not be decoded or names a task this app does not know.
+    Rejected,
+    /// The task was sent back to the broker to be retried.
+    Retried,
+}
+
+impl DeliveryOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeliveryOutcome::Succeeded => "succeeded",
+            DeliveryOutcome::Failed => "failed",
+            DeliveryOutcome::Expired => "expired",
+            DeliveryOutcome::Rejected => "rejected",
+            DeliveryOutcome::Retried => "retried",
+        }
+    }
+}
+
 /// Consumer health information
 #[derive(Debug, Clone)]
 pub struct ConsumerHealth {
@@ -42,6 +69,13 @@ pub trait Delivery: TryDeserializeMessage + Send + Sync + std::fmt::Debug {
     ) -> Result<(), BrokerError>;
     async fn remove(&self) -> Result<(), BrokerError>;
     async fn ack(&self) -> Result<(), BrokerError>;
+
+    /// Acknowledge the delivery once its processing ended with `outcome`. The default only
+    /// acknowledges.
+    async fn ack_with_outcome(&self, outcome: DeliveryOutcome) -> Result<(), BrokerError> {
+        let _ = outcome;
+        self.ack().await
+    }
 }
 
 /// The error type of an unsuccessful delivery.
@@ -79,6 +113,18 @@ pub trait Broker: Send + Sync {
 
     /// Acknowledge a [`Delivery`](trait.Broker.html#associatedtype.Delivery) for deletion.
     async fn ack(&self, delivery: &dyn Delivery) -> Result<(), BrokerError>;
+
+    /// Acknowledge a delivery once its processing ended with `outcome`. Brokers that keep
+    /// a record of processed deliveries can store the outcome with it; the default only
+    /// acknowledges.
+    async fn ack_with_outcome(
+        &self,
+        delivery: &dyn Delivery,
+        outcome: DeliveryOutcome,
+    ) -> Result<(), BrokerError> {
+        let _ = outcome;
+        self.ack(delivery).await
+    }
 
     /// Retry a delivery.
     async fn retry(
